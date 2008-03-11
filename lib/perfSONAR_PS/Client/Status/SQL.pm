@@ -1,49 +1,52 @@
 package perfSONAR_PS::Client::Status::SQL;
 
-our $VERSION = 0.06;
-
 use strict;
+use warnings;
 use Log::Log4perl qw(get_logger);
 use perfSONAR_PS::DB::SQL;
 use perfSONAR_PS::Status::Link;
 use perfSONAR_PS::Status::Common;
 
+our $VERSION = 0.08;
+
+use fields "READ_ONLY", "DBI_STRING", "DB_USERNAME", "DB_PASSWORD", "DB_TABLE", "DB_OPEN", "DATADB";
+
 sub new {
 	my ($package, $dbi_string, $db_username, $db_password, $table, $read_only) = @_;
 
-	my %hash;
+	my $self = fields::new($package);
 
 	if ($read_only) {
-		$hash{"READ_ONLY"} = 1;
+		$self->{"READ_ONLY"} = 1;
 	} else {
-		$hash{"READ_ONLY"} = 0;
+		$self->{"READ_ONLY"} = 0;
 	}
 
 	if (defined $dbi_string and $dbi_string ne "") { 
-		$hash{"DBI_STRING"} = $dbi_string;
+		$self->{"DBI_STRING"} = $dbi_string;
 	}
 
 	if (defined $db_username and $db_username ne "") { 
-		$hash{"DB_USERNAME"} = $db_username;
+		$self->{"DB_USERNAME"} = $db_username;
 	}
 
 	if (defined $db_password and $db_password ne "") { 
-		$hash{"DB_PASSWORD"} = $db_password;
+		$self->{"DB_PASSWORD"} = $db_password;
 	}
 
 	if (defined $table and $table ne "") { 
-		$hash{"DB_TABLE"} = $table;
+		$self->{"DB_TABLE"} = $table;
 	} else {
-		$hash{"DB_TABLE"} = "link_status";
+		$self->{"DB_TABLE"} = "link_status";
 	}
 
-	$hash{"DB_OPEN"} = 0;
-	$hash{"DATADB"} = "";
+	$self->{"DB_OPEN"} = 0;
+	$self->{"DATADB"} = "";
 
-	bless \%hash => $package;
+	return $self;
 }
 
-sub open($) {
+sub open {
 	my ($self) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 
@@ -53,8 +56,8 @@ sub open($) {
 
 	$logger->debug("Table: ".$self->{DB_TABLE});
 
-	$self->{DATADB} = new perfSONAR_PS::DB::SQL($self->{DBI_STRING}, $self->{DB_USERNAME}, $self->{DB_PASSWORD}, \@dbSchema);
-	if (!defined $self->{DATADB}) {
+	$self->{DATADB} = new perfSONAR_PS::DB::SQL({ name => $self->{DBI_STRING}, user => $self->{DB_USERNAME}, pass => $self->{DB_PASSWORD}, schema => \@dbSchema });
+	if (not defined $self->{DATADB}) {
 		my $msg = "Couldn't open specified database";
 		$logger->error($msg);
 		return (-1, $msg);
@@ -72,7 +75,7 @@ sub open($) {
 	return (0, "");
 }
 
-sub close($) {
+sub close {
 	my ($self) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 
@@ -83,33 +86,35 @@ sub close($) {
 	return $self->{DATADB}->closeDB;
 }
 
-sub setDBIString($$) {
+sub setDBIString {
 	my ($self, $dbi_string) = @_;
 
 	$self->close();
 
 	$self->{DB_OPEN} = 0;
 	$self->{DBI_STRING} = $dbi_string;
+
+    return;
 }
 
-sub dbIsOpen($) {
+sub dbIsOpen {
 	my ($self) = @_;
 	return $self->{DB_OPEN};
 }
 
-sub getDBIString($) {
+sub getDBIString {
 	my ($self) = @_;
 
 	return $self->{DBI_STRING};
 }
 
-sub getAll($) {
+sub getAll {
 	my ($self) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 
 	return (-1, "Database is not open") if ($self->{DB_OPEN} == 0);
 
-	my $links = $self->{DATADB}->query("select distinct link_id from ".$self->{DB_TABLE});
+	my $links = $self->{DATADB}->query({ query => "select distinct link_id from ".$self->{DB_TABLE} });
 	if ($links == -1) {
 		$logger->error("Couldn't grab list of links");
 		return (-1, "Couldn't grab list of links");
@@ -120,7 +125,7 @@ sub getAll($) {
 	foreach my $link_ref (@{ $links }) {
 		my @link = @{ $link_ref };
 
-		my $states = $self->{DATADB}->query("select link_knowledge, start_time, end_time, oper_status, admin_status from ".$self->{DB_TABLE}." where link_id=\'".$link[0]."\' order by end_time");
+		my $states = $self->{DATADB}->query({ query => "select link_knowledge, start_time, end_time, oper_status, admin_status from ".$self->{DB_TABLE}." where link_id=\'".$link[0]."\' order by end_time" });
 		if ($states == -1) {
 			$logger->error("Couldn't grab information for link ".$link[0]);
 			return (-1, "Couldn't grab information for link ".$link[0]);
@@ -130,7 +135,7 @@ sub getAll($) {
 			my @state = @{ $state_ref };
 
 			my $new_link = new perfSONAR_PS::Status::Link($link[0], $state[0], $state[1], $state[2], $state[3], $state[4]);
-			if (!defined $links{$link[0]}) {
+			if (not defined $links{$link[0]}) {
 				$links{$link[0]} = ();
 			}
 			push @{ $links{$link[0]} }, $new_link;
@@ -140,13 +145,13 @@ sub getAll($) {
 	return (0, \%links);
 }
 
-sub getUniqueIDs($) {
+sub getUniqueIDs {
 	my ($self) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 
 	return (-1, "Database is not open") if ($self->{DB_OPEN} == 0);
 
-	my $links = $self->{DATADB}->query("select distinct link_id from ".$self->{DB_TABLE});
+	my $links = $self->{DATADB}->query({ query => "select distinct link_id from ".$self->{DB_TABLE} });
 	if ($links == -1) {
 		$logger->error("Couldn't grab list of links");
 		return (-1, "Couldn't grab list of links");
@@ -162,7 +167,7 @@ sub getUniqueIDs($) {
 	return (0, \@link_ids);
 }
 
-sub getLinkHistory($$$) {
+sub getLinkHistory {
 	my ($self, $link_ids, $time) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 
@@ -191,7 +196,7 @@ sub getLinkHistory($$$) {
 		return (-1, $msg);
 	}
 
-	my $states = $self->{DATADB}->query($query);
+	my $states = $self->{DATADB}->query( { query => $query });
 	if ($states == -1) {
 		$logger->error("Couldn't grab link history information");
 		return (-1, "Couldn't grab link history information");
@@ -203,7 +208,7 @@ sub getLinkHistory($$$) {
 		my @state = @{ $state_ref };
 
 		my $new_link = new perfSONAR_PS::Status::Link($state[0], $state[1], $state[2], $state[3], $state[4], $state[5]);
-		if (!defined $links{$state[0]}) {
+		if (not defined $links{$state[0]}) {
 			$links{$state[0]} = ();
 		}
 
@@ -213,7 +218,7 @@ sub getLinkHistory($$$) {
 	return (0, \%links);
 }
 
-sub getLinkStatus($$$) {
+sub getLinkStatus {
 	my ($self, $link_ids, $time) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 
@@ -228,16 +233,20 @@ sub getLinkStatus($$$) {
 
 	my %links;
 
+    if ($time) {
+        $logger->debug("Time: ".$time->getStartTime()."-".$time->getEndTime());
+    }
+
 	foreach my $link_id (@{ $link_ids }) {
 		my $query;
 
-		if (!defined $time) {
+		if (not defined $time) {
 		$query = "select link_knowledge, start_time, end_time, oper_status, admin_status from ".$self->{DB_TABLE}." where link_id=\'".$link_id."\' order by end_time desc limit 1";
 		} else {
 		$query = "select link_knowledge, start_time, end_time, oper_status, admin_status from ".$self->{DB_TABLE}." where link_id=\'".$link_id."\' and start_time <= \'".$time->getEndTime()."\' and end_time >= \'".$time->getStartTime()."\'";
 		}
 
-		my $states = $self->{DATADB}->query($query);
+		my $states = $self->{DATADB}->query({ query => $query });
 		if ($states == -1) {
 			$logger->error("Couldn't grab information for node ".$link_id);
 			return (-1, "Couldn't grab information for node ".$link_id);
@@ -259,17 +268,19 @@ sub getLinkStatus($$$) {
 
 			$new_link = new perfSONAR_PS::Status::Link($link_id, $state[0], $state[1], $state[2], $state[3], $state[4]);
 
-			my @newa = ();
-			push @newa, $new_link;
+            if (not defined $links{$link_id}) {
+                my @newa = ();
+                $links{$link_id} = \@newa;
+            }
 
-			$links{$link_id} = \@newa;
+			push @{ $links{$link_id} }, $new_link;
 		}
 	}
 
 	return (0, \%links);
 }
 
-sub updateLinkStatus($$$$$$$) {
+sub updateLinkStatus {
 	my($self, $time, $link_id, $knowledge_level, $oper_value, $admin_value, $do_update) = @_;
 	my $logger = get_logger("perfSONAR_PS::Client::Status::SQL");
 	my $prev_end_time;
@@ -296,7 +307,7 @@ sub updateLinkStatus($$$$$$$) {
 		return (-1, $msg);
 	}
 
-	if (defined $do_update and $do_update != 0) {
+	if ($do_update) {
 		my @tmp_array = ( $link_id );
 
 		my ($status, $res) = $self->getLinkStatus(\@tmp_array, undef);
@@ -309,7 +320,13 @@ sub updateLinkStatus($$$$$$$) {
 
 		my $link = pop(@{ $res->{$link_id} });
 
-		if (!defined $link or $link->getOperStatus ne $oper_value or $link->getAdminStatus ne $admin_value) {
+        if (defined $link and $link->getEndTime > $time) {
+			my $msg = "Update in the past for $link_id: most recent data was obtained for ".$link->getEndTime;
+			$logger->error($msg);
+			return (-1, $msg);
+        }
+
+		if (not defined $link or $link->getOperStatus ne $oper_value or $link->getAdminStatus ne $admin_value) {
 			$logger->debug("Something changed on link $link_id");
 			$do_update = 0;
 		} else {
@@ -317,6 +334,18 @@ sub updateLinkStatus($$$$$$$) {
 		}
 	} else {
 		$do_update = 0;
+
+		my @tmp_array = ( $link_id );
+        my $time_elm = perfSONAR_PS::Time->new("point", $time);
+
+		my ($status, $res) = $self->getLinkStatus(\@tmp_array, $time_elm);
+
+        if (defined $res->{$link_id} and defined $res->{$link_id}->[0]) {
+            my $state = $res->{$link_id}->[0];
+			my $msg = "Already have information on $link_id at $time";
+			$logger->error($msg);
+			return (-1, $msg);
+        }
 	}
 
 	if ($do_update != 0) {
@@ -331,7 +360,7 @@ sub updateLinkStatus($$$$$$$) {
 				end_time => $prev_end_time,
 			    );
 
-		if ($self->{DATADB}->update($self->{DB_TABLE}, \%where, \%updateValues) == -1) {
+		if ($self->{DATADB}->update({ table => $self->{DB_TABLE}, wherevalues => \%where, updatevalues => \%updateValues }) == -1) {
 			my $msg = "Couldn't update link status for link $link_id";
 			$logger->error($msg);
 			$self->{DATADB}->closeDB;
@@ -347,7 +376,7 @@ sub updateLinkStatus($$$$$$$) {
 				link_knowledge => $knowledge_level,
 				);
 
-		if ($self->{DATADB}->insert($self->{DB_TABLE}, \%insertValues) == -1) {
+		if ($self->{DATADB}->insert({ table => $self->{DB_TABLE}, argvalues => \%insertValues }) == -1) {
 			my $msg = "Couldn't update link status for link $link_id";
 
 			$logger->error($msg);
@@ -387,7 +416,7 @@ on the object for the specific database.
 	use perfSONAR_PS::Client::Status::SQL;
 
 	my $status_client = new perfSONAR_PS::Client::Status::SQL("DBI:SQLite:dbname=status.db");
-	if (!defined $status_client) {
+	if (not defined $status_client) {
 		print "Problem creating client for status MA\n";
 		exit(-1);
 	}
@@ -507,31 +536,32 @@ of the specified link at a certain point in time.
 
 The getLinkStatus function returns the link status at the specified time. The
 $link_ids parameter is a reference to an array of link ids. $time is the time
-at which you'd like to know each link's status. If $time is an empty string, it
-returns the most recent information it has about each link. It returns the
-results as a hash with the key being the link id. Each element of the hash is
-an array of perfSONAR_PS::Status::Link structures containing a the status
-of the specified link at a certain point in time.
+at which you'd like to know each link's status. $time is a perfSONAR_PS::Time
+element. If $time is an undefined, it returns the most recent information it
+has about each link. It returns the results as a hash with the key being the
+link id. Each element of the hash is an array of perfSONAR_PS::Status::Link
+structures containing a the status of the specified link at a certain point in
+time.
 
 =head2 updateLinkStatus($self, $time, $link_id, $knowledge_level, $oper_value, $admin_value, $do_update) 
 
 The updateLinkStatus function adds a new data point for the specified link.
-$time is the time at which the measurement occured. $link_id is the link to
-update. $knowledge_level says whether or not this measurement can tell us
-everything about a given link ("full") or whether the information only
-corresponds to one side of the link("partial"). $oper_value is the current
-operational status and $admin_value is the current administrative status.
-$do_update tells whether or not we should try to update the a given range of
-information(e.g. if you were polling the link and knew that nothing had changed
-from the previous iteration, you could set $do_update to 1 and the server would
-elongate the previous range instead of creating a new one).
+$time is a unix timestamp corresponding to when the measurement occured.
+$link_id is the link to update. $knowledge_level says whether or not this
+measurement can tell us everything about a given link ("full") or whether the
+information only corresponds to one side of the link("partial"). $oper_value is
+the current operational status and $admin_value is the current administrative
+status.  $do_update tells whether or not we should try to update the a given
+range of information(e.g. if you were polling the link and knew that nothing
+had changed from the previous iteration, you could set $do_update to 1 and the
+server would elongate the previous range instead of creating a new one).
 
 =head2 getUniqueIDs($self)
 
-This function is NOT available in the SQL client as the functionality it is not
-exposed by the MA. It does more or less what it sounds like, it returns a list
-of unique link ids that appear in the database. This is used by the MA to get
-the list of IDs to register with the LS.
+This function is ONLY available in the SQL client as the functionality it is
+not exposed by the MA. It does more or less what it sounds like, it returns a
+list of unique link ids that appear in the database. This is used by the MA to
+get the list of IDs to register with the LS.
 
 =head1 SEE ALSO
 
@@ -567,3 +597,4 @@ Copyright (c) 2004-2007, Internet2 and the University of Delaware
 All rights reserved.
 
 =cut
+# vim: expandtab shiftwidth=4 tabstop=4
